@@ -251,10 +251,7 @@ export function injectGatewayProviderIntoCodexConfig(
   // Drop leading blank lines from stripped so the provider block stays compact
   // and the output is stable across repeated invocations (idempotency).
   let firstNonBlank = 0;
-  while (
-    firstNonBlank < stripped.length &&
-    stripped[firstNonBlank]?.trim() === ""
-  ) {
+  while (firstNonBlank < stripped.length && stripped[firstNonBlank]?.trim() === "") {
     firstNonBlank += 1;
   }
   const remaining = stripped.slice(firstNonBlank);

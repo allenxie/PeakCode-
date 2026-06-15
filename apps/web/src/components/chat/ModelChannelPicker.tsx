@@ -17,23 +17,14 @@ import {
   MenuSubTrigger,
 } from "../ui/menu";
 import { ChevronRightIcon } from "~/lib/icons";
-import {
-  gatewayConfigQueryOptions,
-  serverQueryKeys,
-} from "~/lib/serverReactQuery";
+import { gatewayConfigQueryOptions, serverQueryKeys } from "~/lib/serverReactQuery";
 import { ensureNativeApi } from "~/nativeApi";
 
 // ------------------------------------------------------------------
 // Data model
 // ------------------------------------------------------------------
 
-export type ModelChannelId =
-  | "deepseek"
-  | "siliconflow"
-  | "volcano"
-  | "tongyi"
-  | "kimi"
-  | "minimax";
+export type ModelChannelId = "deepseek" | "siliconflow" | "volcano" | "tongyi" | "kimi" | "minimax";
 
 export type ModelChannel = {
   readonly id: ModelChannelId;
@@ -272,9 +263,7 @@ export const ModelChannelPicker = memo(function ModelChannelPicker({
   onOpenChange?: (open: boolean) => void;
 }) {
   const gatewayConfigQuery = useQuery(gatewayConfigQueryOptions());
-  const enabledCount = (gatewayConfigQuery.data?.channels ?? []).filter(
-    (ch) => ch.enabled,
-  ).length;
+  const enabledCount = (gatewayConfigQuery.data?.channels ?? []).filter((ch) => ch.enabled).length;
 
   return (
     <MenuSub open={open} onOpenChange={onOpenChange}>
