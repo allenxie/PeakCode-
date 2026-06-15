@@ -89,12 +89,15 @@ import {
   XIcon,
 } from "../lib/icons";
 import {
+  gatewayConfigQueryOptions,
+  gatewaySecretStatusQueryOptions,
   serverConfigQueryOptions,
   serverQueryKeys,
   serverWorktreesQueryOptions,
 } from "../lib/serverReactQuery";
 import { cn, isMacPlatform } from "../lib/utils";
 import { newCommandId } from "../lib/utils";
+import { resolveWsHttpUrl } from "../lib/wsHttpUrl";
 import { ensureNativeApi, readNativeApi } from "../nativeApi";
 import {
   buildNotificationSettingsSupportText,
@@ -114,13 +117,7 @@ import { sameProviderOrder } from "../providerOrdering";
 
 // ── Model Channels (Service Gateways) ──────────────────────────────────────
 
-type ModelChannelId =
-  | "deepseek"
-  | "siliconflow"
-  | "volcano"
-  | "tongyi"
-  | "kimi"
-  | "minimax";
+type ModelChannelId = "deepseek" | "siliconflow" | "volcano" | "tongyi" | "kimi" | "minimax";
 
 type ModelChannel = {
   readonly id: ModelChannelId;
@@ -171,31 +168,6 @@ const MODEL_CHANNELS: ReadonlyArray<ModelChannel> = [
     iconColor: "#10B981",
   },
 ];
-
-const MODEL_CHANNELS_STORAGE_KEY = "peakcode:enabled-model-channels:v1";
-
-function readEnabledModelChannels(): ReadonlyArray<ModelChannelId> {
-  try {
-    const raw = localStorage.getItem(MODEL_CHANNELS_STORAGE_KEY);
-    if (!raw) return MODEL_CHANNELS.map((c) => c.id);
-    const parsed = JSON.parse(raw);
-    if (Array.isArray(parsed)) {
-      const valid = new Set(MODEL_CHANNELS.map((c) => c.id));
-      return parsed.filter((id): id is ModelChannelId => valid.has(id));
-    }
-  } catch {
-    // ignore
-  }
-  return MODEL_CHANNELS.map((c) => c.id);
-}
-
-function writeEnabledModelChannels(ids: ReadonlyArray<ModelChannelId>): void {
-  try {
-    localStorage.setItem(MODEL_CHANNELS_STORAGE_KEY, JSON.stringify(ids));
-  } catch {
-    // ignore
-  }
-}
 
 type InstallBinarySettingsKey =
   | "claudeBinaryPath"
@@ -672,6 +644,56 @@ function SettingsRouteView() {
   const serverConfigQuery = useQuery(serverConfigQueryOptions());
   const serverWorktreesQuery = useQuery(serverWorktreesQueryOptions());
   const removeWorktreeMutation = useMutation(gitRemoveWorktreeMutationOptions({ queryClient }));
+  const gatewayConfigQuery = useQuery(gatewayConfigQueryOptions());
+  const gatewaySecretStatusQuery = useQuery(gatewaySecretStatusQueryOptions());
+  const updateGatewayConfigMutation = useMutation({
+    mutationFn: async (patch: Record<string, unknown>) => {
+      const api = ensureNativeApi();
+      return api.gateway.updateConfig(patch);
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: serverQueryKeys.gateway.config() });
+    },
+  });
+  const setGatewayApiKeyMutation = useMutation({
+    mutationFn: async (input: { channelId: string; apiKey: string }) => {
+      const api = ensureNativeApi();
+      return api.gateway.setApiKey(
+        input as {
+          channelId:
+            | "deepseek"
+            | "siliconflow"
+            | "volcano"
+            | "tongyi"
+            | "kimi"
+            | "minimax"
+            | "custom";
+          apiKey: string;
+        },
+      );
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: serverQueryKeys.gateway.secretStatus() });
+    },
+  });
+  const removeGatewayApiKeyMutation = useMutation({
+    mutationFn: async (channelId: string) => {
+      const api = ensureNativeApi();
+      return api.gateway.removeApiKey({
+        channelId: channelId as
+          | "deepseek"
+          | "siliconflow"
+          | "volcano"
+          | "tongyi"
+          | "kimi"
+          | "minimax"
+          | "custom",
+      });
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: serverQueryKeys.gateway.secretStatus() });
+    },
+  });
   const syncServerReadModel = useStore((store) => store.syncServerReadModel);
   const threads = useStore(useMemo(() => createAllThreadsSelector(), []));
   const projects = useStore((store) => store.projects);
@@ -724,10 +746,6 @@ function SettingsRouteView() {
     Partial<Record<ProviderKind, string | null>>
   >({});
   const [showAllCustomModels, setShowAllCustomModels] = useState(false);
-  const [enabledModelChannels, setEnabledModelChannels] = useState<ReadonlyArray<ModelChannelId>>(
-    readEnabledModelChannels,
-  );
-  const [gatewayRunning, setGatewayRunning] = useState(false);
   const [browserNotificationPermission, setBrowserNotificationPermission] = useState(
     readBrowserNotificationPermissionState(),
   );
@@ -2554,26 +2572,28 @@ function SettingsRouteView() {
             description="启动后可通过统一本地端点访问所有已启用的模型渠道。"
             control={
               <Switch
-                checked={gatewayRunning}
-                onCheckedChange={(checked) => setGatewayRunning(checked)}
+                checked={gatewayConfigQuery.data?.enabled ?? false}
+                disabled={updateGatewayConfigMutation.isPending}
+                onCheckedChange={(checked) => {
+                  updateGatewayConfigMutation.mutate({ enabled: checked });
+                }}
               />
             }
           />
-          {gatewayRunning ? (
+          {gatewayConfigQuery.data?.enabled ? (
             <div className="mt-4 space-y-5 border-t border-border pt-4">
               {/* ── Local API ── */}
               <div>
                 <h4 className="mb-2 text-sm font-semibold text-foreground">Local API</h4>
                 <p className="mb-2 text-xs text-muted-foreground">
-                  Listening on http://127.0.0.1:9872/v1
+                  Listening on {resolveWsHttpUrl("/gateway/openai/v1")}
                 </p>
                 <div className="space-y-1">
                   {[
-                    { label: "Root", url: "http://127.0.0.1:9872/v1" },
-                    { label: "Chat", url: "http://127.0.0.1:9872/v1/chat/completions" },
-                    { label: "Messages", url: "http://127.0.0.1:9872/v1/messages" },
-                    { label: "Responses", url: "http://127.0.0.1:9872/v1/responses" },
-                    { label: "Models", url: "http://127.0.0.1:9872/v1/models" },
+                    { label: "Root", url: resolveWsHttpUrl("/gateway/openai/v1") },
+                    { label: "Chat", url: resolveWsHttpUrl("/gateway/openai/v1/chat/completions") },
+                    { label: "Models", url: resolveWsHttpUrl("/gateway/openai/v1/models") },
+                    { label: "Responses", url: resolveWsHttpUrl("/gateway/openai/v1/responses") },
                   ].map((ep) => (
                     <div
                       key={ep.label}
@@ -2592,10 +2612,48 @@ function SettingsRouteView() {
                         }}
                         aria-label={`Copy ${ep.label} URL`}
                       >
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                        <svg
+                          width="14"
+                          height="14"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        >
+                          <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+                          <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                        </svg>
                       </button>
                     </div>
                   ))}
+                </div>
+              </div>
+
+              {/* ── API Keys ── */}
+              <div>
+                <h4 className="mb-2 text-sm font-semibold text-foreground">API Keys</h4>
+                <div className="space-y-2">
+                  {gatewayConfigQuery.data?.channels?.map((channel) => {
+                    const secret = gatewaySecretStatusQuery.data?.secrets?.find(
+                      (s) => s.channelId === channel.id,
+                    );
+                    return (
+                      <ChannelApiKeyRow
+                        key={channel.id}
+                        channelId={channel.id}
+                        channelName={channel.name}
+                        hasApiKey={secret?.hasApiKey ?? false}
+                        onSetApiKey={(apiKey) => {
+                          setGatewayApiKeyMutation.mutate({ channelId: channel.id, apiKey });
+                        }}
+                        onRemoveApiKey={() => {
+                          removeGatewayApiKeyMutation.mutate(channel.id);
+                        }}
+                      />
+                    );
+                  })}
                 </div>
               </div>
 
@@ -2858,17 +2916,21 @@ function SettingsRouteView() {
         <div className="space-y-2">
           <SettingsRow
             title="服务渠道"
-            description="管理第三方模型 API 渠道接入，启用后可在对应提供商中使用这些渠道。"
+            description="管理第三方模型 API 渠道接入，启用网关后自动暴露对应模型。"
             status={
               <span className="text-[11px] text-muted-foreground">
-                ({enabledModelChannels.length}/{MODEL_CHANNELS.length} 已启用)
+                ({(gatewayConfigQuery.data?.channels ?? []).filter((c) => c.enabled).length}/
+                {MODEL_CHANNELS.length} 已启用)
               </span>
             }
           >
             <div className="mt-4 border-t border-border pt-4">
               <div className="space-y-1">
                 {MODEL_CHANNELS.map((channel) => {
-                  const isEnabled = enabledModelChannels.includes(channel.id);
+                  const serverChannel = gatewayConfigQuery.data?.channels?.find(
+                    (c) => c.id === channel.id,
+                  );
+                  const isEnabled = serverChannel?.enabled ?? true;
                   return (
                     <div
                       key={channel.id}
@@ -2896,22 +2958,22 @@ function SettingsRouteView() {
                       <div className="min-w-0">
                         <div className="flex items-center gap-2 text-sm font-medium">
                           <span>{channel.name}</span>
-                          {channel.balance ? (
-                            <span className="text-xs font-normal text-emerald-500">
-                              余额 {channel.balance}
-                            </span>
-                          ) : null}
                         </div>
                         <div className="text-xs text-muted-foreground">{channel.subtitle}</div>
                       </div>
                       <Switch
                         checked={isEnabled}
+                        disabled={updateGatewayConfigMutation.isPending}
                         onCheckedChange={(checked) => {
-                          const next = checked
-                            ? [...enabledModelChannels, channel.id]
-                            : enabledModelChannels.filter((id) => id !== channel.id);
-                          setEnabledModelChannels(next);
-                          writeEnabledModelChannels(next);
+                          const channels = gatewayConfigQuery.data?.channels ?? [];
+                          const patched = channels.some((c) => c.id === channel.id)
+                            ? channels.map((c) =>
+                                c.id === channel.id ? { id: c.id, enabled: checked } : c,
+                              )
+                            : [...channels, { id: channel.id, enabled: checked }];
+                          updateGatewayConfigMutation.mutate({
+                            channels: patched,
+                          });
                         }}
                       />
                     </div>
@@ -3715,6 +3777,63 @@ function SettingsRouteView() {
         defaultExpandedVersion={APP_VERSION}
       />
     </SidebarInset>
+  );
+}
+
+function ChannelApiKeyRow(props: {
+  channelId: string;
+  channelName: string;
+  hasApiKey: boolean;
+  onSetApiKey: (apiKey: string) => void;
+  onRemoveApiKey: () => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState("");
+  return (
+    <div className="flex items-center justify-between rounded-md border border-border/40 px-3 py-2">
+      <span className="text-sm font-medium">{props.channelName}</span>
+      {editing ? (
+        <div className="flex items-center gap-2">
+          <Input
+            type="password"
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+            placeholder="sk-..."
+            className="h-7 w-48 text-xs"
+          />
+          <Button
+            size="xs"
+            variant="outline"
+            onClick={() => {
+              if (value.trim()) {
+                props.onSetApiKey(value.trim());
+              }
+              setEditing(false);
+              setValue("");
+            }}
+          >
+            保存
+          </Button>
+          <Button size="xs" variant="outline" onClick={() => setEditing(false)}>
+            取消
+          </Button>
+        </div>
+      ) : (
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-muted-foreground">
+            {props.hasApiKey ? "已设置" : "未设置 API Key"}
+          </span>
+          <Button size="xs" variant="outline" onClick={() => setEditing(true)}>
+            {props.hasApiKey ? "更新" : "设置"}
+          </Button>
+          {props.hasApiKey ? (
+            <Button size="xs" variant="outline" onClick={props.onRemoveApiKey}>
+              清除
+            </Button>
+          ) : null}
+        </div>
+      )}
+    </div>
   );
 }
 

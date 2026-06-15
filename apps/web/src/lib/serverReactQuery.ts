@@ -1,4 +1,4 @@
-import type { ProviderKind } from "@peakcode/contracts";
+import type { GatewayChannelId, ProviderKind } from "@peakcode/contracts";
 import { queryOptions } from "@tanstack/react-query";
 import { ensureNativeApi } from "~/nativeApi";
 
@@ -11,6 +11,10 @@ export const serverQueryKeys = {
   worktrees: () => ["server", "worktrees"] as const,
   providerUsage: (provider: ProviderKind | null | undefined, homePath?: string | null) =>
     ["server", "providerUsage", provider ?? null, homePath ?? null] as const,
+  gateway: {
+    config: () => ["gateway", "config"] as const,
+    secretStatus: () => ["gateway", "secrets"] as const,
+  },
 };
 
 export function serverConfigQueryOptions() {
@@ -89,5 +93,27 @@ export function serverProviderUsageSnapshotQueryOptions(input: {
         ...(input.homePath ? { homePath: input.homePath } : {}),
       });
     },
+  });
+}
+
+export function gatewayConfigQueryOptions() {
+  return queryOptions({
+    queryKey: serverQueryKeys.gateway.config(),
+    queryFn: async () => {
+      const api = ensureNativeApi();
+      return api.gateway.getConfig();
+    },
+    staleTime: Infinity,
+  });
+}
+
+export function gatewaySecretStatusQueryOptions() {
+  return queryOptions({
+    queryKey: serverQueryKeys.gateway.secretStatus(),
+    queryFn: async () => {
+      const api = ensureNativeApi();
+      return api.gateway.getSecretStatus();
+    },
+    staleTime: 30_000,
   });
 }
