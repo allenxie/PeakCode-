@@ -317,7 +317,11 @@ describe("openAIChatStreamToAnthropicStream", () => {
     expect(text).toContain('"type":"tool_use"');
     expect(text).toContain('"id":"call_1"');
     expect(text).toContain('"name":"read"');
-    expect(text).toContain('"input":{"a":1}');
+    // Anthropic streaming protocol: tool_use input is emitted via an
+    // input_json_delta event whose partial_json carries the arguments JSON,
+    // not as an inline `input` field on the content_block_start event.
+    expect(text).toContain('"type":"input_json_delta"');
+    expect(text).toContain('"partial_json":"{\\"a\\":1}"');
     expect(text).toContain('"stop_reason":"tool_use"');
   });
 });

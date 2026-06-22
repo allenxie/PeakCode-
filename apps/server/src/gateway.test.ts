@@ -131,6 +131,10 @@ describe("gateway protocol conversion", () => {
       {
         role: "assistant",
         content: null,
+        // DeepSeek reasoning models require every assistant message with
+        // tool_calls to carry a non-empty reasoning_content; the gateway
+        // backfills a placeholder so upstream doesn't reject the request.
+        reasoning_content: "tool call",
         tool_calls: [
           {
             id: "call_1",
